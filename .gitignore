@@ -1,0 +1,5 @@
+*.nt
+OptimiseWin10 copy.ps1
+WindowsOptimizer_Backup.json
+WindowsOptimizer.log
+!.gitignore

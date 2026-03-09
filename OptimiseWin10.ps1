@@ -25,10 +25,19 @@ param(
 # REABRIR COMO ADMIN
 # ================================
 
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
-{
-    Write-Host "Reabriendo como administrador..."
-    Start-Process powershell "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+if (-not ([Security.Principal.WindowsPrincipal] `
+    [Security.Principal.WindowsIdentity]::GetCurrent() `
+    ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+
+    $script = $MyInvocation.MyCommand.Path
+
+    # reconstruir argumentos originales
+    $argumentos = $MyInvocation.Line.Replace($MyInvocation.InvocationName, "").Trim()
+
+    Start-Process powershell `
+    -Verb RunAs `
+    -ArgumentList "-ExecutionPolicy Bypass -File `"$script`" $argumentos"
+
     exit
 }
 # ==========
@@ -172,7 +181,40 @@ $Servicios_VM = @(
     "vmicvmsession",
     "HvHost"
 )
+# ==========
+# NIVELES
+# ==========
 
+$Nivel_Seguro = @(
+    @{ Nombre="Xbox"; Lista=$Servicios_Xbox }
+    @{ Nombre="Diagnostico"; Lista=$Servicios_Diagnostico }
+    @{ Nombre="Edge"; Lista=$Servicios_Edge }
+    @{ Nombre="Mapas"; Lista=$Servicios_Mapas }
+    @{ Nombre="Telefonia"; Lista=$Servicios_Telefonia }
+    @{ Nombre="Sync"; Lista=$Servicios_Sync }
+    @{ Nombre="Demo"; Lista=$Servicios_Demo }
+)
+
+$Nivel_Medio = @(
+    @{ Nombre="Print"; Lista=$Servicios_Print }
+    @{ Nombre="Bluetooth"; Lista=$Servicios_Bluetooth }
+    @{ Nombre="Sensores"; Lista=$Servicios_Sensores }
+    @{ Nombre="Display"; Lista=$Servicios_Display }
+    @{ Nombre="RedCompartida"; Lista=$Servicios_Red }
+    @{ Nombre="Remote"; Lista=$Servicios_Remote }
+    @{ Nombre="SmartCard"; Lista=$Servicios_SmartCard }
+    @{ Nombre="Apps"; Lista=$Servicios_App }
+    @{ Nombre="Instalacion"; Lista=$Servicios_Instalacion }
+)
+
+$Nivel_Peligroso = @(
+    @{ Nombre="Busqueda"; Lista=$Servicios_Busqueda }
+    @{ Nombre="Prefetch"; Lista=$Servicios_Prefetch }
+    @{ Nombre="UpdateDistrib"; Lista=$Servicios_UpdateDistrib }
+    @{ Nombre="Media"; Lista=$Servicios_Media }
+    @{ Nombre="Tracking"; Lista=$Servicios_Tracking }
+    @{ Nombre="Virtualizacion"; Lista=$Servicios_VM }
+)
 #==================================
 # APLICAR FLAGS
 # =================================
@@ -343,9 +385,7 @@ function Desactivar-Tareas {
 # ==================
 # Log
 # ==================
-$DesktopPath = [Environment]::GetFolderPath("Desktop")
-$logFile = "$DesktopPath\WindowsOptimizer.log"
-$null > $logFile
+$logFile = "$PSScriptRoot\WindowsOptimizer.log"
 function log {
     
     param($mensaje)
@@ -360,7 +400,7 @@ function log {
 # ==================
 # RESPALO
 # ==================
-$BackupFile = "$DesktopPath\WindowsOptimizer_Backup.json"
+$BackupFile = "$PSScriptRoot\WindowsOptimizer_Backup.json"
 $BackupServicios = @{}
 function Guardar-EstadoServicio {
     param($nombre)
@@ -374,9 +414,16 @@ function Guardar-EstadoServicio {
 }
 function Guardar-Backup {
     if ($BackupServicios.Count -gt 0){
+        $r = Read-Host "Guardar backup de servicios? (s/n)"
+        if ($r -ne "s"){
+            return
+        }
+        $null > $logFile
         $BackupServicios | ConvertTo-Json | Set-Content $BackupFile
         Log "Backup guardado en $BackupFile"
+        return
     }
+    log "No se cambio ningun servicio, no se guarda backup"
 }
 function Restaurar-Servicios {
     if (!(Test-Path $BackupFile)){
@@ -389,19 +436,6 @@ function Restaurar-Servicios {
         Write-Host "Restaurando $($servicio.Name)"
     }
     Write-Host ""
-    Write-Host "Restauracion completada"
-}
-# ================================
-# PERFIL GAMING
-# ================================
-function Perfil-Gaming {
-    
-    log "Aplicando perfil GAMING"
-    
-    Desactivar-Categoria "Xbox" $Servicios_Xbox
-    Desactivar-Categoria "Diagnostico" $Servicios_Diagnostico
-    Desactivar-Categoria "EdgeUpdate" $Servicios_Edge
-    
 }
 
 # ================================
@@ -427,26 +461,6 @@ function Perfil-Server {
     Desactivar-Categoria "Diagnostico" $Servicios_Diagnostico
 
 }
-
-# =======================
-# PERFIL ULTRA
-# =======================
-
-function Perfil-Ultra {
-
-    log "Aplicando perfil ULTRA"
-    
-    Desactivar-Categoria "Xbox" $Servicios_Xbox
-    Desactivar-Categoria "Impresion" $Servicios_Print
-    Desactivar-Categoria "Bluetooth" $Servicios_Bluetooth
-    Desactivar-Categoria "Movil" $Servicios_Movil
-    Desactivar-Categoria "Diagnostico" $Servicios_Diagnostico
-    Desactivar-Categoria "Edge" $Servicios_Edge
-    Desactivar-Categoria "Remote" $Servicios_Remote
-    Desactivar-Categoria "Virtualizacion" $Servicios_VM
-
-}
-
 # ================================
 # AUTO DETECT
 # ================================
@@ -548,22 +562,286 @@ function Perfil-Auto {
     }
 
 }
+# ==================
+# PERFIL GAMING
+# ==================
+function Perfil-Gaming {
 
+    log "Activando modo esports"
+
+    if (-not (Advertencia-Latencia)) {
+
+        return
+
+    }
+
+    Modo-FPS
+    Modo-BajaLatencia
+    Modo-TimerResolution
+
+    Desactivar-PowerThrottling
+    Optimizar-Scheduler
+    Optimizar-NIC
+    Optimizar-USB
+    Optimizar-Timers
+    Optimizar-PrioridadCPU
+
+}
+
+function Optimizar-PrioridadCPU {
+
+    log "Optimizando prioridad CPU"
+
+    reg add "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" `
+        /v Win32PrioritySeparation `
+        /t REG_DWORD `
+        /d 26 `
+        /f
+
+}
+function Optimizar-Timers {
+
+    log "Desactivando dynamic tick"
+
+    bcdedit /set disabledynamictick yes
+
+}
+
+function Optimizar-USB {
+
+    log "Desactivando ahorro energia USB"
+
+    powercfg -setacvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0
+    powercfg -setdcvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0
+    powercfg -setactive SCHEME_CURRENT
+
+}
+
+function Optimizar-NIC {
+
+    log "Optimizando tarjeta de red"
+
+    $nics = Get-NetAdapter | Where-Object {$_.Status -eq "Up"}
+
+    foreach ($nic in $nics) {
+
+        try {
+
+            Set-NetAdapterAdvancedProperty `
+                -Name $nic.Name `
+                -DisplayName "Interrupt Moderation" `
+                -DisplayValue "Disabled" `
+                -ErrorAction SilentlyContinue
+
+        } catch {}
+
+    }
+
+}
+
+function Optimizar-Scheduler {
+
+    log "Optimizando scheduler multimedia"
+
+    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v SystemResponsiveness /t REG_DWORD /d 0 /f
+
+    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v NetworkThrottlingIndex /t REG_DWORD /d 4294967295 /f
+}
+
+function Desactivar-PowerThrottling {
+
+    log "Desactivando power throttling"
+
+    reg add "HKLM\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling" /v PowerThrottlingOff /t REG_DWORD /d 1 /f
+
+}
+
+function Modo-TimerResolution {
+
+    log "Aplicando timer resolution optimizado"
+
+    reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\kernel" /v GlobalTimerResolutionRequests /t REG_DWORD /d 1 /f
+
+}
+
+function Modo-FPS {
+
+    log "Aplicando modo FPS"
+
+    # plan de energia alto rendimiento
+    powercfg /setactive SCHEME_MIN
+
+    # desactivar ahorro USB
+    powercfg -setacvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0
+    powercfg -setdcvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0
+    powercfg -setactive SCHEME_CURRENT
+
+    # evitar throttling CPU
+    powercfg -setacvalueindex SCHEME_CURRENT 54533251-82be-4824-96c1-47b60b740d00 893dee8e-2bef-41e0-89c6-b55d0929964c 100
+    powercfg -setacvalueindex SCHEME_CURRENT 54533251-82be-4824-96c1-47b60b740d00 bc5038f7-23e0-4960-96da-33abaf5935ec 100
+    powercfg -setactive SCHEME_CURRENT
+
+    # prioridad de procesos en primer plano
+    reg add "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" /v Win32PrioritySeparation /t REG_DWORD /d 26 /f
+
+}
+
+function Modo-BajaLatencia {
+
+    log "Aplicando modo baja latencia"
+
+    # Prioridad de procesos en primer plano
+    reg add "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" /v Win32PrioritySeparation /t REG_DWORD /d 26 /f
+
+    # Desactivar Nagle (reduce delay en paquetes pequeños)
+    $interfaces = Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
+
+    foreach ($iface in $interfaces) {
+
+        New-ItemProperty -Path $iface.PSPath -Name "TcpAckFrequency" -Value 1 -PropertyType DWORD -Force | Out-Null
+        New-ItemProperty -Path $iface.PSPath -Name "TCPNoDelay" -Value 1 -PropertyType DWORD -Force | Out-Null
+        New-ItemProperty -Path $iface.PSPath -Name "TcpDelAckTicks" -Value 0 -PropertyType DWORD -Force | Out-Null
+
+    }
+
+    # Reducir latencia del scheduler multimedia
+    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v NetworkThrottlingIndex /t REG_DWORD /d 4294967295 /f
+
+    # Mejor prioridad multimedia
+    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v SystemResponsiveness /t REG_DWORD /d 0 /f
+
+}
+# =====================================
+# ADVERTIR DEL MODO DE BAJA LATENCIA
+# =====================================
+function Advertencia-Latencia {
+
+    Write-Host ""
+    Write-Host "=========================================" -ForegroundColor Yellow
+    Write-Host " ADVERTENCIA - MODO BAJA LATENCIA"
+    Write-Host "=========================================" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Estos tweaks reducen latencia para gaming,"
+    Write-Host "pero pueden afectar algunos sistemas:"
+    Write-Host ""
+    Write-Host " - audio con cortes o crackling"
+    Write-Host " - video con stuttering"
+    Write-Host " - problemas con software de streaming"
+    Write-Host ""
+    Write-Host "Si ocurre alguno de estos problemas,"
+    Write-Host "puedes restaurar el backup del script con
+    $(Split-Path -Leaf $PSCommandPath) -restore"
+    Write-Host ""
+    Detectar-Audio
+    Detectar-GPU
+    Detectar-Streaming
+    Write-Host ""
+
+    $resp = Read-Host "¿Continuar de todas formas? (s/n)"
+
+    if ($resp -ne "s") {
+
+        log "Modo baja latencia cancelado por usuario"
+        return $false
+
+    }
+
+    return $true
+}
+function Detectar-Audio {
+
+    $audio = Get-CimInstance Win32_SoundDevice
+
+    if ($audio) {
+
+        log "Dispositivo de audio detectado"
+
+        foreach ($a in $audio) {
+
+            log "Audio: $($a.Name)"
+
+        }
+
+        return $true
+
+    }
+
+    return $false
+}
+function Detectar-GPU {
+
+    $gpu = Get-CimInstance Win32_VideoController
+
+    foreach ($g in $gpu) {
+
+        log "GPU detectada: $($g.Name)"
+
+    }
+
+}
+function Detectar-Streaming {
+    $procesos = Get-Process -ErrorAction SilentlyContinue
+
+    $streaming = $procesos | Where-Object {
+
+        $_.Name -match "obs|stream|shadowplay|xsplit|discord"
+
+    }
+
+    if ($streaming) {
+
+        log "Software de streaming detectado"
+
+        foreach ($p in $streaming) {
+
+            log "Proceso: $($p.Name)"
+
+        }
+
+        return $true
+
+    }
+
+    return $false
+}
 # ================================
 # MENU
 # ================================
+function Aplicar-Nivel {
+    param(
+        $Nivel,
+        $nivelNumero
+    )
 
+    if ($nivelNumero -eq "1") { $nivelNombre = "SEGURO" }
+    if ($nivelNumero -eq "2") { $nivelNombre = "MEDIO" }
+    if ($nivelNumero -eq "3") { $nivelNombre = "PELIGROSO" }
+    
+    Write-Host "============================" -ForegroundColor Cyan
+    log        "Aplicando nivel: $nivelNombre"
+    Write-Host "============================" -ForegroundColor Cyan
+
+    foreach ($categoria in $Nivel) {
+
+        $nombre = $categoria.Nombre
+        $lista = $categoria.Lista
+
+        Desactivar-Categoria $nombre $lista
+    }
+}
 function Mostrar-Menu {
     Write-Host ""
     Write-Host "╔══════════════════════════════════════╗"
     Write-Host "║        WINDOWS OPTIMIZER             ║"
     Write-Host "╠══════════════════════════════════════╣"
-    Write-Host "║ 1 ► Gaming                           ║"
-    Write-Host "║ 2 ► Laptop                           ║"
+    Write-Host "║ 1 ► Gaming (Alto rendimiento)        ║"
+    Write-Host "║ 2 ► Laptop (Bajo consumo)            ║"
     Write-Host "║ 3 ► Server                           ║"
-    Write-Host "║ 4 ► Ultra                            ║"
+    Write-Host "║ 4 ► Personalizado                    ║"
     Write-Host "║ 5 ► Auto Detect Hardware             ║"
-    Write-Host "║ 6 ► Personalizado                    ║"
+    Write-Host "║ 6 ► Ultra                            ║"
+    Write-Host "║ 7 ► Medio                            ║"
+    Write-Host "║ 8 ► Bajo                             ║"
     Write-Host "║                                      ║"
     Write-Host "║ 0 ► Salir                            ║"
     Write-Host "╚══════════════════════════════════════╝"
@@ -576,9 +854,20 @@ function Mostrar-Menu {
         "1" { Perfil-Gaming }
         "2" { Perfil-Laptop }
         "3" { Perfil-Server }
-        "4" { Perfil-Ultra }
+        "4" { Perfil-Personalizado }
         "5" { Perfil-Auto }
-        "6" { Perfil-Personalizado }
+        "6" {
+            Aplicar-nivel $Nivel_Seguro "1"
+            Aplicar-nivel $Nivel_Medio "2"
+            Aplicar-Nivel $Nivel_Peligroso "3"
+        }
+        "7" {
+            Aplicar-nivel $Nivel_Seguro "1"
+            Aplicar-nivel $Nivel_Medio "2"
+        }
+        "8" {
+            Aplicar-nivel $Nivel_Seguro "1"
+        }
         "0" { exit }
         
         default {
@@ -605,8 +894,6 @@ function Perfil-Personalizado {
 
         Preguntar-Categoria "¿Usas impresora?" "Impresion" $Servicios_Print
 
-        Preguntar-Categoria "¿Usas Bluetooth?" "Bluetooth" $Servicios_Bluetooth
-
         Preguntar-Categoria "¿Usas sensores o pantalla tactil?" "Sensores" $Servicios_Sensores
 
         Preguntar-Categoria "¿Usas sincronizacion de cuenta Microsoft?" "SyncUsuario" $Servicios_Sync
@@ -619,7 +906,7 @@ function Perfil-Personalizado {
 
         Preguntar-Categoria "¿Usas Bluetooth o dispositivos inalambricos?" "Bluetooth" $Servicios_Bluetooth
 
-        Preguntar-Categoria "¿Desactivar telemetria y diagnostico?" "Diagnostico" $Servicios_Diagnostico
+        Preguntar-Categoria "¿Deseas tener la telemetria y diagnostico?" "Diagnostico" $Servicios_Diagnostico
 
     }
 
@@ -628,7 +915,19 @@ function Perfil-Personalizado {
     if ($resp -eq "s") {
         Tweaks-Registro
     }
+    $resp = Read-Host "¿Priorizar FPS o energia? (fps/eco)"
 
+    if ($resp -eq "fps") {
+
+        Perfil-Gaming
+
+    }
+
+    if ($resp -eq "eco") {
+
+        Modo-Energia
+
+    }
 }
 
 # ================================
@@ -636,6 +935,7 @@ function Perfil-Personalizado {
 # ================================
 if ($restore){
 Restaurar-Servicios
+Read-Host "Restauración completada. Presione Enter para salir..."
 exit
 }
 if ($gaming) { Perfil-Gaming }
